@@ -23,17 +23,19 @@ static void *seqdev_seq_start(struct seq_file *s, loff_t *pos)
 	if (!it)
 		return NULL;
 	*it = seqdev_data.begin;
+
 	return it;
 }
 
 static void *seqdev_seq_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	(*(int *)v) += seqdev_data.step;
-	return (*(int *)v) <= seqdev_data.end ? v : NULL;
+	*((int *)v) += seqdev_data.step;
+	return (*((int *)v) <= seqdev_data.end) ? v : NULL;
 }
 
 static void seqdev_seq_stop(struct seq_file *s, void *v)
 {
+	kfree(v);
 }
 
 static int seqdev_seq_show(struct seq_file *s, void *v)
@@ -71,6 +73,8 @@ static struct file_operations seqdev_fops = {
 	.owner		= THIS_MODULE,
 	.open		= seqdev_open,
 	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
 	.write		= seqdev_write,
 	.unlocked_ioctl	= seqdev_ioctl
 };
@@ -84,9 +88,9 @@ static struct miscdevice seqdev_dev = {
 static int __init seqdev_init(void)
 {
 	int r;
-
-	if ((r = misc_register(&seqdev_dev))) {
-		printk("seqdev: misc_register failed\n");
+	r = misc_register(&seqdev_dev);
+	if (r) {
+		printk("seqdev: misc_register returned %d\n", r);
 		return r;
 	}
 
