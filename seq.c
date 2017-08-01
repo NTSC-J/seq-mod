@@ -3,7 +3,12 @@
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <linux/limits.h>
+
+#define SEQDEV_BUFSIZE PAGE_SIZE
+
+static DEFINE_MUTEX(seqdev_mutex);
 
 struct seqdev_data_t {
 	int begin;
@@ -15,46 +20,62 @@ static struct seqdev_data_t seqdev_data = {
 	.end	= INT_MAX,
 	.step	= 1
 };
-
-/* seq_operations */
-static void *seqdev_seq_start(struct seq_file *s, loff_t *pos)
-{
-	int *it = kmalloc(sizeof(int), GFP_KERNEL);
-	if (!it)
-		return NULL;
-	*it = seqdev_data.begin;
-
-	return it;
-}
-
-static void *seqdev_seq_next(struct seq_file *s, void *v, loff_t *pos)
-{
-	*((int *)v) += seqdev_data.step;
-	return (*((int *)v) <= seqdev_data.end) ? v : NULL;
-}
-
-static void seqdev_seq_stop(struct seq_file *s, void *v)
-{
-	kfree(v);
-}
-
-static int seqdev_seq_show(struct seq_file *s, void *v)
-{
-	seq_printf(s, "%d\n", *((int *)v));
-	return 0;
-}
-
-static const struct seq_operations seqdev_seq_ops = {
-	.start	= seqdev_seq_start,
-	.next	= seqdev_seq_next,
-	.stop	= seqdev_seq_stop,
-	.show	= seqdev_seq_show
+struct seqdev_file_t {
+	int pos;
+	char *buf;
 };
 
 /* file_operations */
 static int seqdev_open(struct inode *inode, struct file *file)
 {
-	return seq_open(file, &seqdev_seq_ops);
+	file->private_data = kzalloc(sizeof(struct seqdev_file_t), GFP_KERNEL);
+	struct seqdev_file_t *f = file->private_data;
+	f->buf = kzalloc(SEQDEV_BUFSIZE, GFP_KERNEL);
+	f->pos = seqdev_data.begin;
+	printk(KERN_INFO "seq: allocated buffers\n");
+	return 0;
+}
+
+static int seqdev_release(struct inode *inode, struct file *file)
+{
+	struct seqdev_file_t *f = file->private_data;
+	kfree(f->buf);
+	kfree(f);
+	printk(KERN_INFO "seq: freed buffers\n");
+	return 0;
+}
+
+static ssize_t seqdev_read(struct file *file, char __user *buf,
+			   size_t count, loff_t *ppos)
+{
+	struct seqdev_file_t *f = file->private_data;
+
+	/* 行ごとにバッファ */
+	static char linebuf[16];
+	/* 実際に使うバッファサイズ */
+	/* TODO: countがけっこう大きい場合 */
+	/* TODO: countが極端に小さい場合 */
+	size_t bufsize = min(count, SEQDEV_BUFSIZE);
+
+	size_t w = 0;
+	for (;;) {
+		if (seqdev_data.end < f->pos)
+			break;
+		size_t s = snprintf(linebuf, 16, "%d\n", f->pos);
+		if (w + s + 1 < bufsize) {
+			memcpy(f->buf + w, linebuf, s);
+			w += s;
+			f->pos += seqdev_data.step;
+		} else {
+			break;
+		}
+	}
+
+	mutex_lock(&seqdev_mutex);
+	ssize_t read_size = w - copy_to_user(buf, f->buf, w);
+	mutex_unlock(&seqdev_mutex);
+	*ppos += read_size;
+	return read_size;
 }
 
 static ssize_t seqdev_write(struct file *filp, const char __user *buf,
@@ -72,9 +93,8 @@ static long seqdev_ioctl(struct file *filp, unsigned int cmd,
 static struct file_operations seqdev_fops = {
 	.owner		= THIS_MODULE,
 	.open		= seqdev_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release,
+	.release	= seqdev_release,
+	.read		= seqdev_read,
 	.write		= seqdev_write,
 	.unlocked_ioctl	= seqdev_ioctl
 };
@@ -82,6 +102,7 @@ static struct file_operations seqdev_fops = {
 static struct miscdevice seqdev_dev = {
 	.minor	= MISC_DYNAMIC_MINOR,
 	.name	= "seq",
+	.mode	= 0666,
 	.fops	= &seqdev_fops
 };
 
@@ -90,17 +111,17 @@ static int __init seqdev_init(void)
 	int r;
 	r = misc_register(&seqdev_dev);
 	if (r) {
-		printk("seqdev: misc_register returned %d\n", r);
+		printk("seq: misc_register returned %d\n", r);
 		return r;
 	}
 
-	printk("seqdev: loaded\n");
+	printk(KERN_INFO "seq: loaded\n");
 	return 0;
 }
 
 static void __exit seqdev_exit(void)
 {
-	printk(KERN_INFO "seqdev: exit\n");
+	printk(KERN_INFO "seq: exit\n");
 	misc_deregister(&seqdev_dev);
 }
 
