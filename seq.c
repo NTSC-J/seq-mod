@@ -81,6 +81,31 @@ static ssize_t seqdev_read(struct file *file, char __user *buf,
 static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 			 size_t count, loff_t *ppos)
 {
+	int arg1, arg2, arg3, argc;
+	char *input = kmalloc(count, GFP_KERNEL);
+	copy_from_user(input, buf, count);
+
+	argc = sscanf(input, "%d%d%d", &arg1, &arg2, &arg3);
+
+	switch (argc) {
+	case 1:
+		seqdev_data.begin = 1;
+		seqdev_data.end = arg1;
+		seqdev_data.step = 1;
+		break;
+	case 2:
+		seqdev_data.begin = arg1;
+		seqdev_data.end = arg2;
+		seqdev_data.step = 1;
+		break;
+	case 3:
+		seqdev_data.begin = arg1;
+		seqdev_data.end = arg2;
+		seqdev_data.step = arg3;
+		break;
+	default:
+		return -1;
+	}
 	return count;
 }
 
