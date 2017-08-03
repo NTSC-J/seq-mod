@@ -1,0 +1,13 @@
+#ifndef SEQ_IOCTL_H
+#define SEQ_IOCTL_H
+
+#define SEQ_PATH "/dev/seq"
+#define SEQ_IOCTL_GROUP 'y'
+#define SEQ_IOCTL_SET_DELIMITER _IOW(SEQ_IOCTL_GROUP, 1, char)
+#define SEQ_IOCTL_GET_BEGIN _IOR(SEQ_IOCTL_GROUP, 2, int)
+#define SEQ_IOCTL_GET_END _IOR(SEQ_IOCTL_GROUP, 3, int)
+#define SEQ_IOCTL_GET_STEP _IOR(SEQ_IOCTL_GROUP, 4, int)
+#define SEQ_IOCTL_GET_DELIMITER _IOR(SEQ_IOCTL_GROUP, 5, char)
+
+#endif /* SEQ_IOCTL_H */
+

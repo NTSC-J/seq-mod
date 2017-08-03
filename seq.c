@@ -14,11 +14,13 @@ struct seqdev_data_t {
 	int begin;
 	int end;
 	int step;
+	char delimiter;
 };
 static struct seqdev_data_t seqdev_data = {
-	.begin	= 1,
-	.end	= INT_MAX,
-	.step	= 1
+	.begin		= 1,
+	.end		= INT_MAX,
+	.step		= 1,
+	.delimiter	= '\n'
 };
 struct seqdev_file_t {
 	int pos;
@@ -61,7 +63,8 @@ static ssize_t seqdev_read(struct file *file, char __user *buf,
 	for (;;) {
 		if (seqdev_data.end < f->pos)
 			break;
-		size_t s = snprintf(linebuf, 16, "%d\n", f->pos);
+		size_t s = snprintf(linebuf, 16, "%d%c",
+				    f->pos, seqdev_data.delimiter);
 		if (w + s + 1 < bufsize) {
 			memcpy(f->buf + w, linebuf, s);
 			w += s;
@@ -83,7 +86,8 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 {
 	int arg1, arg2, arg3, argc;
 	char *input = kmalloc(count, GFP_KERNEL);
-	copy_from_user(input, buf, count);
+	if (copy_from_user(input, buf, count))
+		return -1;
 
 	argc = sscanf(input, "%d%d%d", &arg1, &arg2, &arg3);
 
@@ -109,10 +113,38 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 	return count;
 }
 
+#define SEQDEV_IOCTL_GROUP 'y'
+#define SEQDEV_IOCTL_SET_DELIMITER _IOW(SEQDEV_IOCTL_GROUP, 1, char)
+#define SEQDEV_IOCTL_GET_BEGIN _IOR(SEQDEV_IOCTL_GROUP, 2, int)
+#define SEQDEV_IOCTL_GET_END _IOR(SEQDEV_IOCTL_GROUP, 3, int)
+#define SEQDEV_IOCTL_GET_STEP _IOR(SEQDEV_IOCTL_GROUP, 4, int)
+#define SEQDEV_IOCTL_GET_DELIMITER _IOR(SEQDEV_IOCTL_GROUP, 5, char)
+
 static long seqdev_ioctl(struct file *filp, unsigned int cmd,
-		     unsigned long arg)
+			 unsigned long arg)
 {
-	return  -ENOTTY;
+	char *cp = (char *)arg;
+	int *ip = (int *)arg;
+
+	switch (cmd) {
+	case SEQDEV_IOCTL_SET_DELIMITER:
+		seqdev_data.delimiter = *cp;
+		return 0;
+	case SEQDEV_IOCTL_GET_BEGIN:
+		*ip = seqdev_data.begin;
+		return 0;
+	case SEQDEV_IOCTL_GET_END:
+		*ip = seqdev_data.end;
+		return 0;
+	case SEQDEV_IOCTL_GET_STEP:
+		*ip = seqdev_data.step;
+		return 0;
+	case SEQDEV_IOCTL_GET_DELIMITER:
+		*cp = seqdev_data.delimiter;
+		return 0;
+	default:
+		return  -ENOTTY;
+	}
 }
 
 static struct file_operations seqdev_fops = {
