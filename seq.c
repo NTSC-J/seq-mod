@@ -93,9 +93,7 @@ static ssize_t seqdev_read(struct file *file, char __user *buf,
 		}
 	}
 
-	mutex_lock(&seqdev_mutex);
 	ssize_t read_size = w - copy_to_user(buf, f->buf, w);
-	mutex_unlock(&seqdev_mutex);
 	*ppos += read_size;
 	return read_size;
 }
@@ -105,6 +103,9 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 {
 	int arg1, arg2, arg3, argc;
 	char *input = kmalloc(count, GFP_KERNEL);
+
+	mutex_lock(&seqdev_mutex);
+
 	if (copy_from_user(input, buf, count))
 		return -1;
 
@@ -129,6 +130,9 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 	default:
 		return -1;
 	}
+
+	mutex_unlock(&seqdev_mutex);
+
 	return count;
 }
 
