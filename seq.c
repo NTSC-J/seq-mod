@@ -146,25 +146,26 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 static long seqdev_ioctl(struct file *filp, unsigned int cmd,
 			 unsigned long arg)
 {
-	char *cp = (char *)arg;
-	int *ip = (int *)arg;
+	char __user *cp = (char *)arg;
+	int __user *ip = (int *)arg;
+	int r;
 
 	switch (cmd) {
 	case SEQDEV_IOCTL_SET_DELIMITER:
-		seqdev_data.delimiter = *cp;
-		return 0;
+		r = copy_from_user(&seqdev_data.delimiter, cp, sizeof(int));
+		return -r;
 	case SEQDEV_IOCTL_GET_BEGIN:
-		*ip = seqdev_data.begin;
-		return 0;
+		r = copy_to_user(ip, &seqdev_data.begin, sizeof(int));
+		return -r;
 	case SEQDEV_IOCTL_GET_END:
-		*ip = seqdev_data.end;
-		return 0;
+		r = copy_to_user(ip, &seqdev_data.end, sizeof(int));
+		return -r;
 	case SEQDEV_IOCTL_GET_STEP:
-		*ip = seqdev_data.step;
-		return 0;
+		r = copy_to_user(ip, &seqdev_data.step, sizeof(int));
+		return -r;
 	case SEQDEV_IOCTL_GET_DELIMITER:
-		*cp = seqdev_data.delimiter;
-		return 0;
+		r = copy_to_user(cp, &seqdev_data.delimiter, 1);
+		return -r;
 	default:
 		return  -ENOTTY;
 	}
