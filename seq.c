@@ -124,8 +124,8 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 		break;
 	case 3:
 		seqdev_data.begin = arg1;
-		seqdev_data.end = arg2;
-		seqdev_data.step = arg3;
+		seqdev_data.step = arg2;
+		seqdev_data.end = arg3;
 		break;
 	default:
 		return -1;
@@ -152,7 +152,7 @@ static long seqdev_ioctl(struct file *filp, unsigned int cmd,
 
 	switch (cmd) {
 	case SEQDEV_IOCTL_SET_DELIMITER:
-		r = copy_from_user(&seqdev_data.delimiter, cp, sizeof(int));
+		r = copy_from_user(&seqdev_data.delimiter, cp, 1);
 		return -r;
 	case SEQDEV_IOCTL_GET_BEGIN:
 		r = copy_to_user(ip, &seqdev_data.begin, sizeof(int));
@@ -206,6 +206,7 @@ static void __exit seqdev_exit(void)
 	misc_deregister(&seqdev_dev);
 }
 
+MODULE_AUTHOR("Fuga Kato");
 MODULE_LICENSE("GPL");
 module_init(seqdev_init);
 module_exit(seqdev_exit);
