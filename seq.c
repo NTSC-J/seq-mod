@@ -20,10 +20,10 @@
 #include <linux/module.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
-#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/limits.h>
+#include "seq_ioctl.h"
 
 #define SEQDEV_BUFSIZE PAGE_SIZE
 
@@ -31,8 +31,8 @@ static DEFINE_MUTEX(seqdev_mutex);
 
 struct seqdev_data_t {
 	int begin;
-	int end;
 	int step;
+	int end;
 	char delimiter;
 };
 static struct seqdev_data_t seqdev_data = {
@@ -49,40 +49,50 @@ struct seqdev_file_t {
 /* file_operations */
 static int seqdev_open(struct inode *inode, struct file *file)
 {
+	struct seqdev_file_t *f;
+
 	file->private_data = kzalloc(sizeof(struct seqdev_file_t), GFP_KERNEL);
-	struct seqdev_file_t *f = file->private_data;
+	f = file->private_data;
 	f->buf = kzalloc(SEQDEV_BUFSIZE, GFP_KERNEL);
 	f->pos = seqdev_data.begin;
-	printk(KERN_INFO "seq: allocated buffers\n");
+
 	return 0;
 }
 
 static int seqdev_release(struct inode *inode, struct file *file)
 {
-	struct seqdev_file_t *f = file->private_data;
+	struct seqdev_file_t *f;
+
+	f = file->private_data;
 	kfree(f->buf);
 	kfree(f);
-	printk(KERN_INFO "seq: freed buffers\n");
+	f = NULL;
+
 	return 0;
 }
 
 static ssize_t seqdev_read(struct file *file, char __user *buf,
 			   size_t count, loff_t *ppos)
 {
-	struct seqdev_file_t *f = file->private_data;
-
-	/* 行ごとにバッファ */
-	static char linebuf[16];
-	/* 実際に使うバッファサイズ */
 	/* TODO: countがけっこう大きい場合 */
 	/* TODO: countが極端に小さい場合 */
-	size_t bufsize = min(count, SEQDEV_BUFSIZE);
 
-	size_t w = 0;
+	struct seqdev_file_t *f;
+	static char linebuf[16];
+	size_t bufsize, w;
+	ssize_t read_size;
+
+	f = file->private_data;
+	bufsize = min(count, SEQDEV_BUFSIZE);
+	w = 0;
+
+	mutex_lock(&seqdev_mutex);
 	for (;;) {
+		size_t s;
+
 		if (seqdev_data.end < f->pos)
 			break;
-		size_t s = snprintf(linebuf, 16, "%d%c",
+		s = snprintf(linebuf, 16, "%d%c",
 				    f->pos, seqdev_data.delimiter);
 		if (w + s + 1 < bufsize) {
 			memcpy(f->buf + w, linebuf, s);
@@ -92,35 +102,41 @@ static ssize_t seqdev_read(struct file *file, char __user *buf,
 			break;
 		}
 	}
+	mutex_unlock(&seqdev_mutex);
 
-	ssize_t read_size = w - copy_to_user(buf, f->buf, w);
+	read_size = w - copy_to_user(buf, f->buf, w);
 	*ppos += read_size;
+
 	return read_size;
 }
 
 static ssize_t seqdev_write(struct file *filp, const char __user *buf,
-			 size_t count, loff_t *ppos)
+			    size_t count, loff_t *ppos)
 {
 	int arg1, arg2, arg3, argc;
-	char *input = kmalloc(count, GFP_KERNEL);
+	char *input;
+
+	input = kmalloc(count, GFP_KERNEL);
 
 	mutex_lock(&seqdev_mutex);
 
-	if (copy_from_user(input, buf, count))
+	if (copy_from_user(input, buf, count)) {
+		mutex_unlock(&seqdev_mutex);
 		return -1;
+	}
 
 	argc = sscanf(input, "%d%d%d", &arg1, &arg2, &arg3);
 
 	switch (argc) {
 	case 1:
 		seqdev_data.begin = 1;
-		seqdev_data.end = arg1;
 		seqdev_data.step = 1;
+		seqdev_data.end = arg1;
 		break;
 	case 2:
 		seqdev_data.begin = arg1;
-		seqdev_data.end = arg2;
 		seqdev_data.step = 1;
+		seqdev_data.end = arg2;
 		break;
 	case 3:
 		seqdev_data.begin = arg1;
@@ -128,6 +144,7 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 		seqdev_data.end = arg3;
 		break;
 	default:
+		mutex_unlock(&seqdev_mutex);
 		return -1;
 	}
 
@@ -136,36 +153,23 @@ static ssize_t seqdev_write(struct file *filp, const char __user *buf,
 	return count;
 }
 
-#define SEQDEV_IOCTL_GROUP 'y'
-#define SEQDEV_IOCTL_SET_DELIMITER _IOW(SEQDEV_IOCTL_GROUP, 1, char)
-#define SEQDEV_IOCTL_GET_BEGIN _IOR(SEQDEV_IOCTL_GROUP, 2, int)
-#define SEQDEV_IOCTL_GET_END _IOR(SEQDEV_IOCTL_GROUP, 3, int)
-#define SEQDEV_IOCTL_GET_STEP _IOR(SEQDEV_IOCTL_GROUP, 4, int)
-#define SEQDEV_IOCTL_GET_DELIMITER _IOR(SEQDEV_IOCTL_GROUP, 5, char)
-
 static long seqdev_ioctl(struct file *filp, unsigned int cmd,
 			 unsigned long arg)
 {
 	char __user *cp = (char *)arg;
 	int __user *ip = (int *)arg;
-	int r;
 
 	switch (cmd) {
-	case SEQDEV_IOCTL_SET_DELIMITER:
-		r = copy_from_user(&seqdev_data.delimiter, cp, 1);
-		return -r;
-	case SEQDEV_IOCTL_GET_BEGIN:
-		r = copy_to_user(ip, &seqdev_data.begin, sizeof(int));
-		return -r;
-	case SEQDEV_IOCTL_GET_END:
-		r = copy_to_user(ip, &seqdev_data.end, sizeof(int));
-		return -r;
-	case SEQDEV_IOCTL_GET_STEP:
-		r = copy_to_user(ip, &seqdev_data.step, sizeof(int));
-		return -r;
-	case SEQDEV_IOCTL_GET_DELIMITER:
-		r = copy_to_user(cp, &seqdev_data.delimiter, 1);
-		return -r;
+	case SEQ_IOCTL_SET_DELIMITER:
+		return -copy_from_user(&seqdev_data.delimiter, cp, 1);
+	case SEQ_IOCTL_GET_BEGIN:
+		return -copy_to_user(ip, &seqdev_data.begin, sizeof(int));
+	case SEQ_IOCTL_GET_END:
+		return -copy_to_user(ip, &seqdev_data.end, sizeof(int));
+	case SEQ_IOCTL_GET_STEP:
+		return -copy_to_user(ip, &seqdev_data.step, sizeof(int));
+	case SEQ_IOCTL_GET_DELIMITER:
+		return -copy_to_user(cp, &seqdev_data.delimiter, 1);
 	default:
 		return  -ENOTTY;
 	}
@@ -190,19 +194,18 @@ static struct miscdevice seqdev_dev = {
 static int __init seqdev_init(void)
 {
 	int r;
+
 	r = misc_register(&seqdev_dev);
 	if (r) {
-		printk("seq: misc_register returned %d\n", r);
+		printk(KERN_ALERT "seq: misc_register returned %d\n", r);
 		return r;
 	}
 
-	printk(KERN_INFO "seq: loaded\n");
 	return 0;
 }
 
 static void __exit seqdev_exit(void)
 {
-	printk(KERN_INFO "seq: exit\n");
 	misc_deregister(&seqdev_dev);
 }
 

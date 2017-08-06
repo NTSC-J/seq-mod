@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include "seq_ioctl.h"
+#include "../seq_ioctl.h"
 
 static int fd;
 
